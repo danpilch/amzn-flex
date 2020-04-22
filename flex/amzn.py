@@ -18,7 +18,7 @@ class amzn_flex(object):
         self.file_path = "/tmp/flex"
 
         # Timeout login after 50 minutes (token expires after 3600seconds)
-        self.timeout_after = 300 
+        self.timeout_after = 3200
 
     def flex_login(self):
         # Login to amazon flex
