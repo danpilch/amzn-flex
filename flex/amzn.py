@@ -28,6 +28,12 @@ class amzn_flex(object):
 
         self.found_offers_id_list = []
 
+        # Criteria for accepting block
+        self.criteria_block_service_ids = ["290578f2-4c88-40d5-8f4c-7d5773177540"]
+        self.criteria_block_duration_hours = "<= 2"
+        self.criteria_block_currency = "GBP"
+        self.criteria_block_price = ">= 26"
+
     def flex_login(self):
         try:
             # Login to amazon flex
@@ -70,14 +76,23 @@ class amzn_flex(object):
         block_start = datetime.fromtimestamp(start)
         block_end = datetime.fromtimestamp(end)
         relative_time = relativedelta(block_end, block_start)
-        return f"Block is {relative_time.hours}h {relative_time.minutes}m"
+        return relative_time
 
-    def flex_check_block_criteria(self, offer):
+    def flex_check_block_criteria(self, offer, relative_time):
+        # Add relative_time.hours to offer dict to evaluate
+        offer['relative_hours'] = relative_time.hours
+        # Add a list of acceptable service_area_ids to evaluate
+        offer['accepted_service_area_ids'] = self.criteria_block_service_ids
+
+        # Specify criteria to meet to accept a block
         rule = rule_engine.Rule(
-            "rateInfo.currency == 'GBP' and rateInfo.priceAmount >= 26"
+            f""" rateInfo.currency == '{self.criteria_block_currency}' 
+               and rateInfo.priceAmount {self.criteria_block_price}
+               and relative_hours {self.criteria_block_duration_hours}
+               and serviceAreaId in accepted_service_area_ids
+            """
         )
         offer_matches = rule.matches(offer)
-        print(offer_matches)
         return offer_matches
 
     def flex_accept_block(self):
@@ -92,16 +107,22 @@ class amzn_flex(object):
             # Check if this offer has been seen before
             for offer in offers['offerList']:
                 if offer['offerId'] not in self.found_offers_id_list:
+                    # Get the relative time from offer start/end epoch
+                    relative_time = self.flex_calculate_block_duration(offer['startTime'], offer['endTime'])
                     # Check if this offer meets criteria
-                    if self.flex_check_block_criteria(offer):
+                    if self.flex_check_block_criteria(offer, relative_time):
                         print("block matches request criteria")
                         filename = f"{self.file_path}/{uuid.uuid1()}.json"
                         os.makedirs(os.path.dirname(filename), exist_ok=True)
-                        print(self.flex_calculate_block_duration(offer['startTime'], offer['endTime']))
                         with open(filename, "w") as f:
                             f.write(json.dumps(offer))
+                        # Add offer to found list
                         self.found_offers_id_list.append(offer['offerId'])
-                    print(f"generated {filename}")
+                        print(f"generated {filename}")
+                    else:
+                        # Add offer to found list
+                        self.found_offers_id_list.append(offer['offerId'])
+                        print("no", offer)
         except Exception as e:
             print(f"could not write file {e}")
             raise
