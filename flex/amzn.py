@@ -4,6 +4,11 @@ import requests
 import logging
 import time
 import uuid
+import json
+import os
+from datetime import datetime
+from dateutil.relativedelta import relativedelta
+import rule_engine
 
 
 class amzn_flex(object):
@@ -20,6 +25,8 @@ class amzn_flex(object):
         # Timeout login after 50 minutes (token expires after 3600seconds)
         self.timeout_after = 3200
         self.seconds_between_block_checks = 2
+
+        self.found_offers_id_list = []
 
     def flex_login(self):
         try:
@@ -52,12 +59,26 @@ class amzn_flex(object):
                 json=self.config.flex_get_offers_json
             )
 
-            if response.json()['offerList'] > 0:
+            if len(response.json()['offerList']) > 0:
                 return response.json()
             else:
                 return None
         except Exception as e:
             self.logged_in = False
+
+    def flex_calculate_block_duration(self, start, end):
+        block_start = datetime.fromtimestamp(start)
+        block_end = datetime.fromtimestamp(end)
+        relative_time = relativedelta(block_end, block_start)
+        return f"Block is {relative_time.hours}h {relative_time.minutes}m"
+
+    def flex_check_block_criteria(self, offer):
+        rule = rule_engine.Rule(
+            "rateInfo.currency == 'GBP' and rateInfo.priceAmount >= 26"
+        )
+        offer_matches = rule.matches(offer)
+        print(offer_matches)
+        return offer_matches
 
     def flex_accept_block(self):
         pass
@@ -68,11 +89,19 @@ class amzn_flex(object):
 
     def store_block_offers(self, offers):
         try:
-            filename = f"{self.file_path}/{uuid.uuid1()}.json"
-            os.makedirs(os.path.dirname(filename), exist_ok=True)
-            with open(filename, "w") as f:
-                f.write(str(offers))
-            print(f"generated {filename}")
+            # Check if this offer has been seen before
+            for offer in offers['offerList']:
+                if offer['offerId'] not in self.found_offers_id_list:
+                    # Check if this offer meets criteria
+                    if self.flex_check_block_criteria(offer):
+                        print("block matches request criteria")
+                        filename = f"{self.file_path}/{uuid.uuid1()}.json"
+                        os.makedirs(os.path.dirname(filename), exist_ok=True)
+                        print(self.flex_calculate_block_duration(offer['startTime'], offer['endTime']))
+                        with open(filename, "w") as f:
+                            f.write(json.dumps(offer))
+                        self.found_offers_id_list.append(offer['offerId'])
+                    print(f"generated {filename}")
         except Exception as e:
             print(f"could not write file {e}")
             raise
