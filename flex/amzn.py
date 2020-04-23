@@ -13,19 +13,27 @@ import rule_engine
 
 class amzn_flex(object):
     def __init__(self, flex_user_id, flex_password):
+        # Define logger
+        self.logger = logging.getLogger('amzn_flex')
+        logging.basicConfig(level = logging.INFO)
+
+        # Get configuration opts
         self.config = config_opts(
             flex_user_id=flex_user_id, 
             flex_password=flex_password
         )
 
+        # init as not logged in
         self.logged_in = False
 
+        # Path to store block info
         self.file_path = "/tmp/flex"
 
         # Timeout login after 50 minutes (token expires after 3600seconds)
         self.timeout_after = 3200
         self.seconds_between_block_checks = 2
 
+        # Empty list for found blocks
         self.found_offers_id_list = []
 
         # Criteria for accepting block
@@ -48,7 +56,7 @@ class amzn_flex(object):
             self.timeout = time.time() + self.timeout_after
 
             if 'success' in json_login_response["response"]:
-                print("successfully authenticated")
+                self.logger.info('successfully logged in')
 
             return json_login_response['response']['success']['tokens']['bearer']['access_token']
         except Exception as e:
@@ -70,30 +78,39 @@ class amzn_flex(object):
             else:
                 return None
         except Exception as e:
+            self.logger.error('failed to get blocks')
             self.logged_in = False
 
     def flex_calculate_block_duration(self, start, end):
-        block_start = datetime.fromtimestamp(start)
-        block_end = datetime.fromtimestamp(end)
-        relative_time = relativedelta(block_end, block_start)
-        return relative_time
+        try:
+            block_start = datetime.fromtimestamp(start)
+            block_end = datetime.fromtimestamp(end)
+            relative_time = relativedelta(block_end, block_start)
+            return relative_time
+        except Exception as e:
+            self.logger.error('failed to calculate block duration')
+            raise
 
     def flex_check_block_criteria(self, offer, relative_time):
-        # Add relative_time.hours to offer dict to evaluate
-        offer['relative_hours'] = relative_time.hours
-        # Add a list of acceptable service_area_ids to evaluate
-        offer['accepted_service_area_ids'] = self.criteria_block_service_ids
+        try:
+            # Add relative_time.hours to offer dict to evaluate
+            offer['relative_hours'] = relative_time.hours
+            # Add a list of acceptable service_area_ids to evaluate
+            offer['accepted_service_area_ids'] = self.criteria_block_service_ids
 
-        # Specify criteria to meet to accept a block
-        rule = rule_engine.Rule(
-            f""" rateInfo.currency == '{self.criteria_block_currency}' 
-               and rateInfo.priceAmount {self.criteria_block_price}
-               and relative_hours {self.criteria_block_duration_hours}
-               and serviceAreaId in accepted_service_area_ids
-            """
-        )
-        offer_matches = rule.matches(offer)
-        return offer_matches
+            # Specify criteria to meet to accept a block
+            rule = rule_engine.Rule(
+                f""" rateInfo.currency == '{self.criteria_block_currency}' 
+                    and rateInfo.priceAmount {self.criteria_block_price}
+                    and relative_hours {self.criteria_block_duration_hours}
+                    and serviceAreaId in accepted_service_area_ids
+                 """
+            )
+            offer_matches = rule.matches(offer)
+            return offer_matches
+        except Exception as e:
+            self.logger.error(f'failed to evaluate block criteria {e}')
+            raise e
 
     def flex_accept_block(self):
         pass
@@ -111,25 +128,25 @@ class amzn_flex(object):
                     relative_time = self.flex_calculate_block_duration(offer['startTime'], offer['endTime'])
                     # Check if this offer meets criteria
                     if self.flex_check_block_criteria(offer, relative_time):
-                        print("block matches request criteria")
+                        self.logger.info("block matches request criteria")
                         filename = f"{self.file_path}/{uuid.uuid1()}.json"
                         os.makedirs(os.path.dirname(filename), exist_ok=True)
                         with open(filename, "w") as f:
                             f.write(json.dumps(offer))
                         # Add offer to found list
                         self.found_offers_id_list.append(offer['offerId'])
-                        print(f"generated {filename}")
+                        self.logger.info(f"generated {filename}")
                     else:
                         # Add offer to found list
                         self.found_offers_id_list.append(offer['offerId'])
-                        print("no", offer)
+                        self.logger.info('block did not meet criteria')
         except Exception as e:
-            print(f"could not write file {e}")
-            raise
+            self.logger.info(f"could not write file {e}")
+            raise e
 
     def flex_control_loop(self):
         # Check if logged in, if not login
-        print(f"Checking every {self.seconds_between_block_checks}s for blocks before timeout in {self.timeout_after}s")
+        self.logger.info(f"Checking every {self.seconds_between_block_checks}s for blocks before timeout in {self.timeout_after}s")
         try:
             if not self.logged_in:
                 login_token = self.flex_login()
@@ -142,7 +159,7 @@ class amzn_flex(object):
                 # Pause to emulate human interaction
                 time.sleep(self.seconds_between_block_checks)
 
-            print("finished")
+            self.logger.info("finished")
             self.logged_in = False
         except Exception as e:
             self.logged_in = False
