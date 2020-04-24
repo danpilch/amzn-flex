@@ -41,6 +41,7 @@ class amzn_flex(object):
         self.criteria_block_duration_hours = "<= 2"
         self.criteria_block_currency = "GBP"
         self.criteria_block_price = ">= 26"
+        self.criteria_accept_block_same_day = False
 
     def flex_login(self):
         try:
@@ -85,29 +86,49 @@ class amzn_flex(object):
         try:
             block_start = datetime.fromtimestamp(start)
             block_end = datetime.fromtimestamp(end)
-            relative_time = relativedelta(block_end, block_start)
-            return relative_time
+            block_relative_time = relativedelta(block_end, block_start)
+            return block_start, block_end, block_relative_time
         except Exception as e:
             self.logger.error('failed to calculate block duration')
             raise
 
-    def flex_check_block_criteria(self, offer, relative_time):
+    def flex_check_block_criteria(self, offer):
         try:
-            # Add relative_time.hours to offer dict to evaluate
-            offer['relative_hours'] = relative_time.hours
+            # Calculate the relative time between start and end time
+            block_start, block_end, block_relative_time = self.flex_calculate_block_duration(
+                offer['startTime'], 
+                offer['endTime']
+            )
+           
+            # Add block_relative_time.hours to offer dict to evaluate
+            offer['block_relative_hours'] = block_relative_time.hours
             # Add a list of acceptable service_area_ids to evaluate
             offer['accepted_service_area_ids'] = self.criteria_block_service_ids
+        
+            # Rule engine
+            criteria_met = True
+
+            # Get datetime object of today
+            today = datetime.now()
+
+            # Check if blocks today are acceptable, if not, check that the 
+            # block_start.day is greater than today. if it isn't fail the criteria
+            if not self.criteria_accept_block_same_day:
+                if block_start.day <= today.day:
+                    self.logger.info(f'block falls outside criteria {block_start.day} {today.day}')
+                    criteria_met = False
 
             # Specify criteria to meet to accept a block
-            rule = rule_engine.Rule(
-                f""" rateInfo.currency == '{self.criteria_block_currency}' 
-                    and rateInfo.priceAmount {self.criteria_block_price}
-                    and relative_hours {self.criteria_block_duration_hours}
-                    and serviceAreaId in accepted_service_area_ids
-                 """
-            )
-            offer_matches = rule.matches(offer)
-            return offer_matches
+            if criteria_met:
+                rule = rule_engine.Rule(
+                    f""" rateInfo.currency == '{self.criteria_block_currency}' 
+                        and rateInfo.priceAmount {self.criteria_block_price}
+                        and block_relative_hours {self.criteria_block_duration_hours}
+                        and serviceAreaId in accepted_service_area_ids
+                     """
+                )
+                criteria_met = rule.matches(offer)
+            return criteria_met
         except Exception as e:
             self.logger.error(f'failed to evaluate block criteria {e}')
             raise e
@@ -124,10 +145,8 @@ class amzn_flex(object):
             # Check if this offer has been seen before
             for offer in offers['offerList']:
                 if offer['offerId'] not in self.found_offers_id_list:
-                    # Get the relative time from offer start/end epoch
-                    relative_time = self.flex_calculate_block_duration(offer['startTime'], offer['endTime'])
                     # Check if this offer meets criteria
-                    if self.flex_check_block_criteria(offer, relative_time):
+                    if self.flex_check_block_criteria(offer):
                         self.logger.info("block matches request criteria")
                         filename = f"{self.file_path}/{uuid.uuid1()}.json"
                         os.makedirs(os.path.dirname(filename), exist_ok=True)
