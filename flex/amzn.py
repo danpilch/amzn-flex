@@ -114,8 +114,8 @@ class amzn_flex(object):
             # Check if blocks today are acceptable, if not, check that the 
             # block_start.day is greater than today. if it isn't fail the criteria
             if not self.criteria_accept_block_same_day:
-                if block_start.day <= today.day:
-                    self.logger.info(f'block falls outside criteria {block_start.day} {today.day}')
+                if block_start.day <= today.day and block_start.month == today.month:
+                    self.logger.info(f'block falls outside criteria {block_start.day} {today.day} {block_start}')
                     criteria_met = False
 
             # Specify criteria to meet to accept a block
