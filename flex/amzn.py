@@ -61,6 +61,7 @@ class amzn_flex(object):
 
             return json_login_response['response']['success']['tokens']['bearer']['access_token']
         except Exception as e:
+            self.logger.error(f'{json_login_response}')
             raise e
 
     def flex_get_blocks(self, login_token):
@@ -182,3 +183,4 @@ class amzn_flex(object):
             self.logged_in = False
         except Exception as e:
             self.logged_in = False
+            raise e

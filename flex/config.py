@@ -53,6 +53,6 @@ class config_opts(object):
         
         self.accept_json = {
             "__type": "AcceptOfferInput:http://internal.amazon.com/coral/com.amazon.omwbuseyservice.offers/",
-            "offerId": f"" 
+#            "offerId": f"" 
         }
 
